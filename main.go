@@ -1279,8 +1279,3 @@ const htmlDashboard = `
 </body>
 </html>
 `
-// package main
-// import "fmt"
-// func main() {
-//     fmt.Println("Hello from GitHub!")
-// }

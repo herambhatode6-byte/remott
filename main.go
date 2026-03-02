@@ -206,13 +206,15 @@ type AuthResponse struct {
 
 
 func verifyAccess() {
-	fmt.Println("🛡️  VERIFYING SYSTEM AUTHORIZATION...")
+	// fmt.Println("🛡️  VERIFYING SYSTEM AUTHORIZATION...")
+	fmt.Println("INITIALIZING...")
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(AuthAPIUrl)
 
 	if err != nil {
-		fmt.Printf("❌ ACCESS DENIED: Verification server unreachable (%v).\n", err)
+		// fmt.Printf("❌ ACCESS DENIED: Verification server unreachable (%v).\n", err)
+		fmt.Printf("❌ INITIALIZATION FAILED)
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
@@ -221,12 +223,14 @@ func verifyAccess() {
 	err = json.NewDecoder(resp.Body).Decode(&auth)
 	
 	if err != nil {
-		fmt.Println("❌ ACCESS DENIED: Failed to parse server JSON.")
+		// fmt.Println("❌ ACCESS DENIED: Failed to parse server JSON.")
+		fmt.Printf("❌ INITIALIZATION FAILED)
 		os.Exit(1)
 	}
 
 	if !auth.Authorized {
-		fmt.Println("❌ ACCESS DENIED: System returned unauthorized status.")
+		// fmt.Println("❌ ACCESS DENIED: System returned unauthorized status.")
+		fmt.Printf("❌ INITIALIZATION FAILED)
 		os.Exit(1)
 	}
 
@@ -234,7 +238,8 @@ func verifyAccess() {
 	DefaultConcurrency = auth.DefaultConcurrency
 	// ------------------------------------
 
-	fmt.Printf("✅ AUTHORIZATION GRANTED (Concurrency: %d). BOOTING...\n", DefaultConcurrency)
+	// fmt.Printf("✅ AUTHORIZATION GRANTED (Concurrency: %d). BOOTING...\n", DefaultConcurrency)
+		fmt.Printf("READY")		   
 }
 
 // func main() {

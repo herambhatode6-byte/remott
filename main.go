@@ -214,7 +214,7 @@ func verifyAccess() {
 
 	if err != nil {
 		// fmt.Printf("❌ ACCESS DENIED: Verification server unreachable (%v).\n", err)
-		fmt.Printf("❌ INITIALIZATION FAILED)
+		fmt.Printf("❌ INITIALIZATION FAILED")
 		os.Exit(1)
 	}
 	defer resp.Body.Close()

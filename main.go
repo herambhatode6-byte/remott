@@ -308,7 +308,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	resp3.Body.Close()
 
 	if loc != "" {
-		redirectUrl := strings.Replace(loc, "playinrace.com", "spinmatch24.com", 1)
+		redirectUrl := strings.Replace(loc, "playinhorse.com", "spinmatch24.com", 1)
 		state.client.Get(redirectUrl)
 	}
 

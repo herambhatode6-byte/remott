@@ -307,9 +307,18 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	loc := resp3.Header.Get("Location")
 	resp3.Body.Close()
 
+	// if loc != "" {
+	// 	redirectUrl := strings.Replace(loc, "playinhorse.com", "spinmatch24.com", 1)
+	// 	state.client.Get(redirectUrl)
+	// }
 	if loc != "" {
-		redirectUrl := strings.Replace(loc, "playinhorse.com", "spinmatch24.com", 1)
-		state.client.Get(redirectUrl)
+	replacer := strings.NewReplacer(
+		"playinhorse.com", "spinmatch24.com",
+		"playinrace.com", "spinmatch24.com",
+	)
+	redirectUrl := replacer.Replace(loc)
+	
+	state.client.Get(redirectUrl)
 	}
 
 	resp5, _ := state.client.Get(spinBase + "/mobile")
